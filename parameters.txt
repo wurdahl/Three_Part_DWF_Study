@@ -1,0 +1,61 @@
+# Shared runtime configuration. Edit values here; recompilation is not needed.
+# Both formulations are dynamical Nf=2 simulations (not quenched).
+
+# Wilson fermions
+wilson.Nt = 48
+wilson.Nx = 128
+wilson.beta = 2.0
+wilson.m0 = 0.15
+wilson.trajectories = 160
+wilson.thermalization_cut = 40
+wilson.thin = 4
+wilson.hmc_steps = 20
+wilson.trajectory_length = 0.10
+wilson.source_t = 0
+wilson.source_x = 0
+wilson.time_boundary_sign = -1.0
+wilson.space_boundary_sign = 1.0
+wilson.force_cg_tolerance = 1.0e-7
+wilson.force_cg_max_iterations = 2500
+wilson.measurement_cg_tolerance = 1.0e-9
+wilson.measurement_cg_max_iterations = 4000
+wilson.random_seed = 1234
+
+# Domain-wall fermions (values from the current include/parameters.hpp)
+dwf.Nt = 32
+dwf.Nx = 50
+dwf.N5 = 12
+dwf.beta = 3.0
+dwf.M5 = 1.0
+dwf.mf = 0.2
+dwf.epsilon = 0.01
+dwf.leapfrog_steps = 40
+dwf.trajectories = 48
+dwf.thermalization_cut = 12
+dwf.thin = 3
+dwf.pseudofermion_rtol = 1.0e-5
+dwf.pseudofermion_maxiter = 1000
+dwf.propagator_rtol = 1.0e-8
+dwf.propagator_maxiter = 800
+dwf.random_seed = 1234
+
+# Flavor-singlet eta measurement. More noise vectors reduce the variance of
+# the disconnected Wick contraction at the cost of extra propagator solves.
+eta.noise_vectors = 8
+eta.random_seed = 918273
+eta.flavors = 2
+
+# Shared analysis controls
+# 0 uses OpenMP's automatic choice; otherwise set an explicit thread count.
+analysis.threads = 0
+analysis.plateau_window_size = 4
+analysis.plateau_flatness_tolerance = 0.08
+analysis.earliest_plateau_time = 2
+analysis.fit_t_min = 3
+analysis.fit_t_max = 11
+analysis.gevp_t0 = 2
+analysis.max_momentum = 5
+# Circular moving-block bootstrap over the ordered gauge configurations.
+analysis.bootstrap_resamples = 2000
+analysis.bootstrap_block_size = 2
+analysis.bootstrap_seed = 24681357

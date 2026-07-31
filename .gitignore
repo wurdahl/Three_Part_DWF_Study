@@ -1,0 +1,7 @@
+/bin/
+/output/
+/scripts/__pycache__/
+*.o
+*.gch
+*.pyc
+compile_commands.json
