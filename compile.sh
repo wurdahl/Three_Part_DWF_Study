@@ -19,3 +19,17 @@ g++ "${flags[@]}" -Iwilson/include wilson/generate_configs.cpp -o bin/generate_w
 g++ "${flags[@]}" -Iwilson/include wilson/analyze_configs.cpp -o bin/analyze_wilson
 
 echo "Built four executables in bin/"
+
+# Optional CUDA generator. nvcc 12.x cannot emit Blackwell SASS, so embed
+# compute_90 PTX and let the driver JIT it for the installed GPU.
+if command -v nvcc >/dev/null 2>&1; then
+  nvcc -O3 -std=c++17 -gencode arch=compute_90,code=compute_90 \
+       -Idomain_wall/include \
+       -c domain_wall/gpu_hmc.cu -o bin/gpu_hmc.o
+  g++ "${flags[@]}" -Idomain_wall/include \
+      domain_wall/generate_configs_gpu.cpp bin/gpu_hmc.o \
+      -o bin/generate_domain_wall_gpu -lcudart
+  echo "Built bin/generate_domain_wall_gpu"
+else
+  echo "nvcc not found; skipped bin/generate_domain_wall_gpu"
+fi
