@@ -30,6 +30,7 @@ dwf.M5 = 1.0
 dwf.mf = 0.2
 dwf.epsilon = 0.01
 dwf.leapfrog_steps = 40
+dwf.hmc_threads = 6
 dwf.trajectories = 48
 dwf.thermalization_cut = 12
 dwf.thin = 3

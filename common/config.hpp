@@ -47,6 +47,13 @@ public:
         }
     }
 
+    int integer_or(const std::string& key, int fallback) const
+    {
+        if (values_.find(key) == values_.end())
+            return fallback;
+        return integer(key);
+    }
+
     int integer(const std::string& key) const
     {
         const std::string value = require(key);

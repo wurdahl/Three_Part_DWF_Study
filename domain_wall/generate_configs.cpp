@@ -15,10 +15,21 @@
 #include <random>
 #include <vector>
 
+#include <malloc.h>
+#include <omp.h>
+
 int main()
 {
     try
     {
+        omp_set_num_threads(hmc_threads > 0 ? hmc_threads : 1);
+
+        // Field-sized vectors are allocated and freed once per operator
+        // application; keeping them below the mmap threshold lets glibc
+        // recycle the same arena block instead of remapping pages.
+        mallopt(M_MMAP_THRESHOLD, 512 * 1024 * 1024);
+        mallopt(M_TRIM_THRESHOLD, 512 * 1024 * 1024);
+
         std::filesystem::create_directories("output/domain_wall");
         std::mt19937_64 rng(random_seed);
         std::normal_distribution<double> normal(0.0, 1.0);

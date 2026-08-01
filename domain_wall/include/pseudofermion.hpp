@@ -55,6 +55,9 @@ inline PseudofermionActionForce pseudofermion_action_force(
     std::vector<Complex> x_fwd(Nt * Nx, Complex(0.0, 0.0));
     std::vector<Complex> x_bwd_out(Nt * Nx, Complex(0.0, 0.0));
 
+    const std::vector<Complex> links = link_table(theta);
+
+#pragma omp parallel for schedule(static)
     for (int t = 0; t < Nt; ++t)
     {
         const int tp = plus_periodic(t, Nt);
@@ -99,17 +102,13 @@ inline PseudofermionActionForce pseudofermion_action_force(
                 const Eigen::Vector2cd term_xf = (I - s2) * xi_xp;
                 const Eigen::Vector2cd term_xb = (I + s2) * xi_xm;
 
-                const Complex Ut =
-                    std::exp(Complex(0.0, theta[gauge_index(0, t, x)]));
+                const Complex Ut = links[gauge_index(0, t, x)];
                 const Complex Ut_dag =
-                    std::conj(std::exp(
-                        Complex(0.0, theta[gauge_index(0, tm, x)])));
+                    std::conj(links[gauge_index(0, tm, x)]);
 
-                const Complex Ux =
-                    std::exp(Complex(0.0, theta[gauge_index(1, t, x)]));
+                const Complex Ux = links[gauge_index(1, t, x)];
                 const Complex Ux_dag =
-                    std::conj(std::exp(
-                        Complex(0.0, theta[gauge_index(1, t, xm)])));
+                    std::conj(links[gauge_index(1, t, xm)]);
 
                 for (int a = 0; a < Ns; ++a)
                 {

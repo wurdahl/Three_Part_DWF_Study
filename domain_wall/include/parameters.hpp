@@ -16,6 +16,9 @@ inline const double M5 = runtime_config().real("dwf.M5");
 inline const double mf = runtime_config().real("dwf.mf");
 inline const double epsilon = runtime_config().real("dwf.epsilon");
 inline const int leapfrog_steps = runtime_config().integer("dwf.leapfrog_steps");
+// OpenMP threads for the Dirac-operator site loops during HMC. Older
+// parameter files without the key keep the previous single-threaded HMC.
+inline const int hmc_threads = runtime_config().integer_or("dwf.hmc_threads", 1);
 inline const int trajectories = runtime_config().integer("dwf.trajectories");
 inline const int thermalization_cut = runtime_config().integer("dwf.thermalization_cut");
 inline const int thin = runtime_config().integer("dwf.thin");

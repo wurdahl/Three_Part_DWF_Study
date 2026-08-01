@@ -12,6 +12,17 @@ inline Complex link(const Gauge& theta, int mu, int t, int x)
     return std::exp(Complex(0.0, theta[gauge_index(mu, t, x)]));
 }
 
+// The gauge field is fixed across an entire operator application, so the
+// link phases can be evaluated once per call instead of once per site per
+// fifth-dimension slice.
+inline std::vector<Complex> link_table(const Gauge& theta)
+{
+    std::vector<Complex> links(Ngauge);
+    for (int i = 0; i < Ngauge; ++i)
+        links[i] = std::exp(Complex(0.0, theta[i]));
+    return links;
+}
+
 inline VectorC apply_D(const Gauge& theta, const VectorC& psi)
 {
     VectorC out = (3.0 - M5) * psi;
@@ -19,7 +30,9 @@ inline VectorC apply_D(const Gauge& theta, const VectorC& psi)
     const Eigen::Matrix2cd I = identity2();
     const Eigen::Matrix2cd s1 = sigma1();
     const Eigen::Matrix2cd s2 = sigma2();
+    const std::vector<Complex> links = link_table(theta);
 
+#pragma omp parallel for collapse(2) schedule(static)
     for (int s = 0; s < N5; ++s)
     {
         for (int t = 0; t < Nt; ++t)
@@ -52,12 +65,12 @@ inline VectorC apply_D(const Gauge& theta, const VectorC& psi)
                 const Eigen::Vector2cd term_xp = (I - s2) * v_xp;
                 const Eigen::Vector2cd term_xm = (I + s2) * v_xm;
 
-                const Complex Ut = link(theta, 0, t, x);
+                const Complex Ut = links[gauge_index(0, t, x)];
                 const Complex Ut_dag =
-                    std::conj(link(theta, 0, tm, x));
-                const Complex Ux = link(theta, 1, t, x);
+                    std::conj(links[gauge_index(0, tm, x)]);
+                const Complex Ux = links[gauge_index(1, t, x)];
                 const Complex Ux_dag =
-                    std::conj(link(theta, 1, t, xm));
+                    std::conj(links[gauge_index(1, t, xm)]);
 
                 for (int a = 0; a < Ns; ++a)
                 {
@@ -98,7 +111,9 @@ inline VectorC apply_D_dagger(const Gauge& theta, const VectorC& psi)
     const Eigen::Matrix2cd I = identity2();
     const Eigen::Matrix2cd s1 = sigma1();
     const Eigen::Matrix2cd s2 = sigma2();
+    const std::vector<Complex> links = link_table(theta);
 
+#pragma omp parallel for collapse(2) schedule(static)
     for (int s = 0; s < N5; ++s)
     {
         for (int t = 0; t < Nt; ++t)
@@ -132,11 +147,11 @@ inline VectorC apply_D_dagger(const Gauge& theta, const VectorC& psi)
                 const Eigen::Vector2cd term_xp = (I + s2) * v_xp;
 
                 const Complex Ut_dag =
-                    std::conj(link(theta, 0, tm, x));
-                const Complex Ut = link(theta, 0, t, x);
+                    std::conj(links[gauge_index(0, tm, x)]);
+                const Complex Ut = links[gauge_index(0, t, x)];
                 const Complex Ux_dag =
-                    std::conj(link(theta, 1, t, xm));
-                const Complex Ux = link(theta, 1, t, x);
+                    std::conj(links[gauge_index(1, t, xm)]);
+                const Complex Ux = links[gauge_index(1, t, x)];
 
                 for (int a = 0; a < Ns; ++a)
                 {
