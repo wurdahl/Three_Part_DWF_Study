@@ -2,8 +2,10 @@
 """Checkpointed parallel three-part dynamical domain-wall study."""
 
 import csv
+import os
 import shutil
 import subprocess
+import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
@@ -12,6 +14,14 @@ PARAMETERS = ROOT / "parameters.txt"
 STUDIES = ROOT / "output/studies"
 
 NX_VALUES = [32, 56, 80, 96]
+GPU_LOCK = threading.Lock()
+ANALYSIS_LOCK = threading.Lock()
+
+
+def mps_active():
+    """Concurrent GPU processes share cleanly only under the MPS daemon."""
+    pipe_dir = os.environ.get("CUDA_MPS_PIPE_DIRECTORY", "/tmp/nvidia-mps")
+    return (Path(pipe_dir) / "control").exists()
 MF_VALUES = [0.0, 0.1, 0.2, 0.3, 0.5, 0.7,
              0.9, 1.1, 1.3, 1.5, 1.75, 2.0]
 
@@ -100,6 +110,12 @@ def run_case(label, changes, destination):
 
     settings = dict(BASE)
     settings.update(changes)
+    # With GPU generation the CPU is free during analysis, so each
+    # analyzer takes every core (threads = 0 is the OpenMP default) and
+    # runs one case at a time instead of four 4-thread analyzers.
+    gpu_generation = os.environ.get("DWF_USE_GPU") == "1"
+    if gpu_generation and "analysis.threads" not in changes:
+        settings["analysis.threads"] = "0"
     destination.mkdir(parents=True, exist_ok=True)
     work = destination / "_work"
     if work.exists():
@@ -114,9 +130,24 @@ def run_case(label, changes, destination):
     log.write_text("")
 
     print(f"START {label}", flush=True)
+    use_gpu = os.environ.get("DWF_USE_GPU") == "1"
+    generator = (
+        "bin/generate_domain_wall_gpu" if use_gpu
+        else "bin/generate_domain_wall")
     try:
-        execute([ROOT / "bin/generate_domain_wall"], work, log)
-        execute([ROOT / "bin/analyze_domain_wall"], work, log)
+        if use_gpu and not mps_active():
+            # Without MPS, concurrent processes time-slice the GPU with
+            # heavy context switching, so generation runs one case at a
+            # time; the CPU analyzers still overlap freely.
+            with GPU_LOCK:
+                execute([ROOT / generator], work, log)
+        else:
+            execute([ROOT / generator], work, log)
+        if use_gpu:
+            with ANALYSIS_LOCK:
+                execute([ROOT / "bin/analyze_domain_wall"], work, log)
+        else:
+            execute([ROOT / "bin/analyze_domain_wall"], work, log)
         execute(["python3", "scripts/estimate_mass.py"], work, log)
         execute(["python3", "scripts/gevp_spectrum.py"], work, log)
         archive(work, destination)
@@ -149,7 +180,9 @@ def main():
     for nx in NX_VALUES:
         tasks.append((
             "volume", nx, f"part1 Nx={nx}",
-            {"dwf.Nx": str(nx), "dwf.trajectories": "3012"},
+            # The analyzer requires max_momentum <= Nx/2.
+            {"dwf.Nx": str(nx), "dwf.trajectories": "3012",
+             "analysis.max_momentum": str(min(5, nx // 2))},
             STUDIES / "part1_volume_1000" / f"Nx_{nx:03d}"))
     tasks.append((
         "dispersion", 6.0, "part2 beta=6 dispersion",

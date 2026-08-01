@@ -29,6 +29,25 @@ mode, and CPU-native vector instructions. To build a portable binary instead:
 NATIVE=0 ./compile.sh
 ```
 
+The domain-wall HMC parallelizes its Dirac-operator site loops with OpenMP;
+`dwf.hmc_threads` in `parameters.txt` sets the thread count (parameter files
+without the key keep the previous single-threaded behavior).
+
+### Optional CUDA generator
+
+If `nvcc` is on the PATH, `compile.sh` additionally builds
+`bin/generate_domain_wall_gpu`, a fully device-resident GPU implementation of
+the domain-wall HMC (fp32 MD force solves, fp64 accept/reject action solves,
+CG in CUDA-graph chunks). Without `nvcc` the GPU build is skipped and nothing
+else changes — every GPU code path in this repository is opt-in.
+
+Validation switches: `DWF_GPU_FP64_MD=1` runs every solve in fp64, and
+building with `-DDWF_CG_CHUNK=1` reproduces the CPU solver's exact stopping
+iteration; together they reproduce the CPU Markov chain to machine precision.
+With the default settings the GPU chain is a statistically equivalent
+realization, not bit-identical to the CPU chain, so avoid mixing CPU- and
+GPU-generated trajectories within one ensemble directory.
+
 ## Run
 
 ```bash
@@ -60,7 +79,24 @@ Part 1 uses four spatial extents, `Nx = 32, 56, 80, 96`. Each point runs
 configuration, yielding exactly 1,000 measured configurations per volume.
 Its checkpoints and results are stored under
 `output/studies/part1_volume_1000/`, separate from the archived exploratory
-12-point scan. Parts 2 and 3 retain their existing settings.
+12-point scan. Parts 2 and 3 retain their existing settings. Volume cases cap
+`analysis.max_momentum` at `Nx / 2` (the analyzer's Nyquist bound), so small
+spatial extents also run.
+
+Setting `DWF_USE_GPU=1` makes the study generate with
+`bin/generate_domain_wall_gpu` (requires the optional CUDA build; the default
+is the CPU generator). In GPU mode the analyzers take every core and run one
+case at a time, and generation is serialized unless the NVIDIA MPS daemon is
+running (`nvidia-cuda-mps-control -d`), which lets concurrent chains share
+the GPU cleanly.
+
+`scripts/run_volume_scan_mf0.py` runs a companion four-volume scan
+(`Nx = 4, 8, 16, 32`) at `mf = 0`, checkpointed under
+`output/studies/part1_volume_1000_mf0/`.
+`scripts/plot_finite_size.py` fits the resulting pion masses with both
+`m_inf + A exp(-B L)` and the 1+1-dimensional wrapping form
+`m_inf (1 + A e^{-x} / sqrt(x))`, `x = m_inf L`, and writes a
+`figs/pionMassVsMpiL_*.pdf` summary figure (requires matplotlib and scipy).
 
 The analyzers measure independent gauge configurations concurrently with
 OpenMP. Set `analysis.threads = 0` for the runtime default, or choose a fixed
