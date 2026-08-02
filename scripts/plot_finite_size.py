@@ -100,6 +100,9 @@ def main():
     parser.add_argument("--mf", default="0.2",
                         help="fermion mass shown in the title")
     parser.add_argument("--out", type=Path, default=FIGURE)
+    parser.add_argument("--channel", choices=["pion", "eta"],
+                        default="pion",
+                        help="summary columns and labels to use")
     parser.add_argument("--invL", action="store_true",
                         help="also fit the gapless form m_inf + c/L and "
                              "plot against Nx instead of m_inf*L")
@@ -115,8 +118,9 @@ def main():
     with args.summary.open(newline="") as stream:
         rows = list(csv.DictReader(stream))
     nxs = np.array([int(row["Nx"]) for row in rows])
-    mVal = np.array([float(row["pion_mass"]) for row in rows])
-    mSig = np.array([float(row["pion_error"]) for row in rows])
+    sym = r"\pi" if args.channel == "pion" else r"{\eta'}"
+    mVal = np.array([float(row[f"{args.channel}_mass"]) for row in rows])
+    mSig = np.array([float(row[f"{args.channel}_error"]) for row in rows])
 
     order = np.argsort(nxs)
     nxs, mVal, mSig = nxs[order], mVal[order], mSig[order]
@@ -143,7 +147,7 @@ def main():
             zorder=2, label=r"$m_\infty + A\,e^{-B L}$")
 
     annotations = [
-        (rf"$am_\pi^\infty = {fmtErr(mInf, dmInf)}$"
+        (rf"$am_{sym}^\infty = {fmtErr(mInf, dmInf)}$"
          rf"$,\ \chi^2/\mathrm{{dof}} = {chi2:.1f}$", JLab_blue)]
 
     if args.invL:
@@ -163,7 +167,7 @@ def main():
                 ls="--", zorder=2,
                 label=rf"$m_\infty + c/L$  ($N_x \geq {args.invL_min_nx}$)")
         annotations.append(
-            (rf"$am_\pi^\infty = {fmtErr(mInfI, dmInfI)}$"
+            (rf"$am_{sym}^\infty = {fmtErr(mInfI, dmInfI)}$"
              rf"$,\ \chi^2/\mathrm{{dof}} = {chi2I:.1f}$", JLab_red))
         print(f"invL (Nx >= {args.invL_min_nx}): "
               f"m_inf = {fmtErr(mInfI, dmInfI)}   "
@@ -198,14 +202,14 @@ def main():
         ax.set_xlabel(r"$N_x$")
     else:
         ax.set_xticks(mInf * nxs, labels=[f"{x:.1f}" for x in mInf * nxs])
-        ax.set_xlabel(r"$m_\pi^\infty L$")
+        ax.set_xlabel(rf"$m_{sym}^\infty L$")
     ax.minorticks_off()
-    ax.set_ylabel(r"$a m_\pi$")
+    ax.set_ylabel(rf"$a m_{sym}$")
     ax.set_xlim(scale * 3, scale * 44)
     ax.set_ylim(bottom=0.0)
 
-    x_name = r"$N_x$" if args.invL else r"$m_\pi^\infty L$"
-    ax.set_title(rf"$am_\pi$ vs {x_name}:  $\beta = 3$, "
+    x_name = r"$N_x$" if args.invL else rf"$m_{sym}^\infty L$"
+    ax.set_title(rf"$am_{sym}$ vs {x_name}:  $\beta = 3$, "
                  rf"$m_f = {args.mf}$, $N_t = 32$", fontsize=17, pad=12)
 
     args.out.parent.mkdir(parents=True, exist_ok=True)

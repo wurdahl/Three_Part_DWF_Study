@@ -224,7 +224,10 @@ def write_summary(path, independent_name, records):
             pion_plateau = masses.get("domain_wall_pion", missing)
             eta_plateau = masses.get("domain_wall_eta", missing)
             pion = masses.get("fit_pion_cosh2", pion_plateau)
-            eta = masses.get("fit_eta_cosh2", eta_plateau)
+            # The noisy singlet correlator dies within a few timeslices,
+            # so the four-parameter cosh2 is under-constrained there; the
+            # one-state fit on the S/N-clipped window is the stable one.
+            eta = masses.get("fit_eta_cosh1", eta_plateau)
             dist = masses.get("fit_dist_pion_n0_cosh2", missing)
             writer.writerow([
                 value, pion[0], pion[1], eta[0], eta[1],
