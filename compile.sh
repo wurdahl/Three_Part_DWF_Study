@@ -15,6 +15,7 @@ if [[ "${NATIVE:-1}" == "1" ]]; then
 fi
 g++ "${flags[@]}" -Idomain_wall/include domain_wall/generate_configs.cpp -o bin/generate_domain_wall
 g++ "${flags[@]}" -Idomain_wall/include domain_wall/analyze_configs.cpp -o bin/analyze_domain_wall
+g++ "${flags[@]}" -Idomain_wall/include domain_wall/build_perambulators.cpp -o bin/build_perambulators
 g++ "${flags[@]}" -Iwilson/include wilson/generate_configs.cpp -o bin/generate_wilson
 g++ "${flags[@]}" -Iwilson/include wilson/analyze_configs.cpp -o bin/analyze_wilson
 

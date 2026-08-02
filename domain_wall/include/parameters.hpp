@@ -36,6 +36,14 @@ inline const int max_momentum =
 inline const unsigned long long random_seed =
     runtime_config().unsigned_integer("dwf.random_seed");
 
+// Distillation (hadspec-style) measurement. Parameter files without these
+// keys keep working: 0 vectors means "min(8, Nx)" and an empty source list
+// means "0 and Nt/2", matching the wall-source measurement.
+inline const int distillation_vectors =
+    runtime_config().integer_or("distillation.n_vectors", 0);
+inline const std::string distillation_t_sources_text =
+    runtime_config().text_or("distillation.t_sources", "");
+
 inline constexpr double pi = 3.141592653589793238462643383279502884;
 inline const std::string configs_filename = "output/domain_wall/configs.npy";
 inline const std::string analysis_configs_filename =

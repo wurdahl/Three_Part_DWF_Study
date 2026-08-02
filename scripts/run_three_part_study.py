@@ -5,6 +5,7 @@ import csv
 import os
 import shutil
 import subprocess
+import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -85,6 +86,26 @@ def read_masses(path):
     return result
 
 
+def read_fits(path):
+    """Primary-window E0 values from fit_correlators.csv, keyed like
+    fit_pion_cosh2; absent for checkpoints made before the fit stage."""
+    result = {}
+    if not path.exists():
+        return result
+    with path.open(newline="") as stream:
+        for row in csv.DictReader(stream):
+            if row["kind"] == "primary":
+                key = f"fit_{row['source']}_{row['model']}"
+                result[key] = (float(row["E0"]), float(row["E0_error"]))
+    return result
+
+
+def read_case_results(destination):
+    results = read_masses(destination / "mass_estimates.csv")
+    results.update(read_fits(destination / "correlator_fits.csv"))
+    return results
+
+
 def archive(work, destination):
     source_dir = work / "output/domain_wall"
     names = [
@@ -92,11 +113,21 @@ def archive(work, destination):
         "momentum_correlators.csv", "gevp_spectrum.csv",
         "pion_eta_correlators.svg", "residual_mass.svg",
         "gauge_history.svg", "run_info_history.csv",
+        "distillation_correlators.csv", "distillation_gevp.csv",
+        "distillation_principal_by_config.csv", "correlator_fits.csv",
+        # Keeping the configurations makes later re-analysis possible
+        # without regenerating the Markov chain.
+        "analysis_configs.npy",
     ]
     for name in names:
         source = source_dir / name
         if source.exists():
             shutil.copy2(source, destination / name)
+    distillation = source_dir / "distillation"
+    if distillation.exists():
+        shutil.copytree(
+            distillation, destination / "distillation",
+            dirs_exist_ok=True)
     shutil.copy2(
         work / "output/mass_estimates.csv",
         destination / "mass_estimates.csv")
@@ -106,7 +137,7 @@ def archive(work, destination):
 def run_case(label, changes, destination):
     if (destination / "COMPLETE").exists():
         print(f"SKIP {label}: checkpoint exists", flush=True)
-        return read_masses(destination / "mass_estimates.csv")
+        return read_case_results(destination)
 
     settings = dict(BASE)
     settings.update(changes)
@@ -125,6 +156,8 @@ def run_case(label, changes, destination):
     shutil.copytree(
         ROOT / "scripts", work / "scripts",
         ignore=shutil.ignore_patterns("__pycache__"))
+    if (ROOT / "distillation_ops.json").exists():
+        shutil.copy2(ROOT / "distillation_ops.json", work)
     (work / "output/domain_wall").mkdir(parents=True)
     log = destination / "run.log"
     log.write_text("")
@@ -143,19 +176,31 @@ def run_case(label, changes, destination):
                 execute([ROOT / generator], work, log)
         else:
             execute([ROOT / generator], work, log)
+        measurements = [
+            [ROOT / "bin/analyze_domain_wall"],
+            [ROOT / "bin/build_perambulators"],
+        ]
         if use_gpu:
             with ANALYSIS_LOCK:
-                execute([ROOT / "bin/analyze_domain_wall"], work, log)
+                for command in measurements:
+                    execute(command, work, log)
         else:
-            execute([ROOT / "bin/analyze_domain_wall"], work, log)
-        execute(["python3", "scripts/estimate_mass.py"], work, log)
-        execute(["python3", "scripts/gevp_spectrum.py"], work, log)
+            for command in measurements:
+                execute(command, work, log)
+        execute([sys.executable, "scripts/estimate_mass.py"], work, log)
+        execute([sys.executable, "scripts/gevp_spectrum.py"], work, log)
+        execute(
+            [sys.executable, "scripts/distillation_contract.py"], work, log)
+        execute(
+            [sys.executable, "scripts/fit_correlators.py"], work, log)
         archive(work, destination)
         (destination / "COMPLETE").write_text("complete\n")
-        masses = read_masses(destination / "mass_estimates.csv")
+        masses = read_case_results(destination)
         print(
             f"DONE {label}: pion={masses.get('domain_wall_pion')} "
-            f"eta={masses.get('domain_wall_eta')}", flush=True)
+            f"pion_cosh2={masses.get('fit_pion_cosh2')} "
+            f"dist_cosh2={masses.get('fit_dist_pion_n0_cosh2')}",
+            flush=True)
         return masses
     finally:
         if (destination / "COMPLETE").exists():
@@ -163,15 +208,28 @@ def run_case(label, changes, destination):
 
 
 def write_summary(path, independent_name, records):
+    """pion_mass/eta_mass prefer the two-state (cosh2) fit and fall back
+    to the plateau average for checkpoints made before the fit stage;
+    the plateau and distillation-GEVP values ride along for comparison."""
+    missing = (float("nan"),) * 2
     with path.open("w", newline="") as stream:
         writer = csv.writer(stream)
         writer.writerow([
             independent_name, "pion_mass", "pion_error",
-            "eta_mass", "eta_error"])
+            "eta_mass", "eta_error",
+            "pion_plateau", "pion_plateau_error",
+            "eta_plateau", "eta_plateau_error",
+            "dist_pion_mass", "dist_pion_error"])
         for value, masses in records:
-            pion = masses.get("domain_wall_pion", (float("nan"),) * 2)
-            eta = masses.get("domain_wall_eta", (float("nan"),) * 2)
-            writer.writerow([value, pion[0], pion[1], eta[0], eta[1]])
+            pion_plateau = masses.get("domain_wall_pion", missing)
+            eta_plateau = masses.get("domain_wall_eta", missing)
+            pion = masses.get("fit_pion_cosh2", pion_plateau)
+            eta = masses.get("fit_eta_cosh2", eta_plateau)
+            dist = masses.get("fit_dist_pion_n0_cosh2", missing)
+            writer.writerow([
+                value, pion[0], pion[1], eta[0], eta[1],
+                pion_plateau[0], pion_plateau[1],
+                eta_plateau[0], eta_plateau[1], dist[0], dist[1]])
 
 
 def main():

@@ -40,6 +40,11 @@ dwf.propagator_rtol = 1.0e-8
 dwf.propagator_maxiter = 800
 dwf.random_seed = 1234
 
+# Distillation (hadspec-style) measurement: bin/build_perambulators.
+# n_vectors = 0 means min(8, Nx); an empty/missing t_sources means 0,Nt/2.
+distillation.n_vectors = 0
+distillation.t_sources = 0,16
+
 # Flavor-singlet eta measurement. More noise vectors reduce the variance of
 # the disconnected Wick contraction at the cost of extra propagator solves.
 eta.noise_vectors = 8

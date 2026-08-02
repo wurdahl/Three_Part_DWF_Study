@@ -93,9 +93,15 @@ the GPU cleanly.
 `scripts/run_volume_scan_mf0.py` runs a companion four-volume scan
 (`Nx = 4, 8, 16, 32`) at `mf = 0`, checkpointed under
 `output/studies/part1_volume_1000_mf0/`.
-`scripts/plot_finite_size.py` fits the resulting pion masses with both
-`m_inf + A exp(-B L)` and the 1+1-dimensional wrapping form
-`m_inf (1 + A e^{-x} / sqrt(x))`, `x = m_inf L`, and writes a
+`scripts/run_volume_scan_cosh2.py` runs both `mf = 0.2` and `mf = 0`
+four-volume scans (`Nx = 4, 8, 16, 32`) through the full measurement chain
+— standard analyzer, distillation, and the two-state correlator fits — and
+writes summaries whose `pion_mass` column is the excited-state-safe cosh2
+fit (plateau and distillation values ride along as extra columns). These
+runs also archive `analysis_configs.npy` and the distillation data, so they
+can be re-analyzed without regenerating the Markov chains.
+`scripts/plot_finite_size.py` fits the resulting pion masses with
+`m_inf + A exp(-B L)`, annotates the chi^2/dof, and writes a
 `figs/pionMassVsMpiL_*.pdf` summary figure (requires matplotlib and scipy).
 
 The analyzers measure independent gauge configurations concurrently with
@@ -135,6 +141,67 @@ helps retain short-range Markov-chain autocorrelation.
 The domain-wall C++ analyzer also retains its original residual-mass
 measurement `m_res = C_J5 / C_PP`; this is distinct from the pseudoscalar mass
 estimated by the shared script.
+
+## Distillation (hadspec-style) spectroscopy
+
+An alternative measurement pipeline in the style of the Hadron Spectrum
+Collaboration: quark fields are smeared with the lowest `distillation.n_vectors`
+eigenvectors of the gauge-covariant spatial Laplacian on each timeslice, and
+the propagator is stored as perambulators in that low-mode basis so that any
+meson correlator becomes a small dense trace formed after the fact.
+
+```bash
+./run.sh perambulators    # C++: bin/build_perambulators
+./run.sh contract         # python: Wick contractions + GEVP
+./run.sh fit-correlators  # python: windowed 1- and 2-exponential fits
+```
+
+`bin/build_perambulators` reads `analysis_configs.npy` and writes, per
+configuration, to `output/domain_wall/distillation/`:
+
+- `perambulators.npy` — tau(t, t0) = V(t)^dag S(t, t0) V(t0) for each source
+  time in `distillation.t_sources` (spin x eigenvector at both ends),
+- `elementals_momentum.npy` — V(t)^dag e^{ipx} V(t) for each momentum up to
+  `analysis.max_momentum`,
+- `elementals_derivative.npy` — the symmetric covariant-derivative analogue,
+- `laplacian_eigenvalues.npy` and `t_sources.npy`.
+
+The solve count is `n_vectors * 2 spins * len(t_sources)` per configuration
+(32 with the defaults, versus 16 for the standard analyzer).
+
+`scripts/distillation_contract.py` then performs the Wick contractions
+automatically for every interpolator listed in `distillation_ops.json`
+(operators are `qbar Gamma q` with `Gamma` built from `id, g5, gt, gx`
+products, a smeared or covariant-derivative spatial structure, and a momentum
+index; conventions: `gamma_t = sigma1`, `gamma_x = sigma2`,
+`gamma5 = sigma3`). Each channel's operator basis becomes a correlator
+matrix, and a fixed-vector GEVP (`analysis.gevp_t0`) yields principal
+correlators written both as ensemble means (`distillation_gevp.csv`) and per
+configuration (`distillation_principal_by_config.csv`) for bootstrapping.
+Only connected contractions are formed; the flavor-singlet disconnected
+piece remains with the Z4-noise machinery of the standard analyzer.
+
+## Correlator fits with excited-state terms
+
+`scripts/fit_correlators.py` replaces the effective-mass plateau average
+with windowed fits of the folded periodic correlator to
+
+```text
+cosh1: C(t) = A0 [e^{-E0 t} + e^{-E0 (Nt-t)}]
+cosh2: C(t) = cosh1 + A1 [e^{-E1 t} + e^{-E1 (Nt-t)}],  E1 = E0 + dE > E0
+```
+
+The two-state form absorbs excited-state contamination so the window can
+start well before any plateau. It fits the wall-source pion and eta plus
+every distillation principal correlator, clips each window where the signal
+leaves the noise, reports a t_min stability scan, and takes E0 errors from
+refitting circular moving-block bootstrap resamples. Results land in
+`output/domain_wall/correlator_fits.csv`.
+
+This matters here: on test ensembles the wall-source pion effective mass is
+still falling across the whole `fit_t_min..fit_t_max` window, so the plateau
+average is biased high, while the cosh2 fit and the distillation GEVP ground
+state agree with each other at a distinctly lower mass.
 
 ## Pion and eta spectroscopy
 

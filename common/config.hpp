@@ -83,6 +83,14 @@ public:
 
     std::string text(const std::string& key) const { return require(key); }
 
+    std::string text_or(
+        const std::string& key, const std::string& fallback) const
+    {
+        if (values_.find(key) == values_.end())
+            return fallback;
+        return require(key);
+    }
+
 private:
     std::unordered_map<std::string, std::string> values_;
 

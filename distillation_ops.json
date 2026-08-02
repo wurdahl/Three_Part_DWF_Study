@@ -1,0 +1,17 @@
+{
+  "comment": "Interpolator list for scripts/distillation_contract.py. Each operator is qbar Gamma q with gamma in {id, g5, gt, gx} or products (g5gt, ...), spatial 'smeared' (Laplacian-eigenvector smearing with momentum phase) or 'deriv' (symmetric covariant derivative), and an integer momentum index p_n = 2 pi n / Nx. Operators inside one channel are contracted into a correlator matrix and solved as a GEVP; keep operators with matching quantum numbers together.",
+  "channels": {
+    "pion": [
+      {"name": "g5", "gamma": "g5", "spatial": "smeared", "momentum": 0},
+      {"name": "g5gt", "gamma": "g5gt", "spatial": "smeared", "momentum": 0}
+    ],
+    "vector": [
+      {"name": "gx", "gamma": "gx", "spatial": "smeared", "momentum": 0},
+      {"name": "id_deriv", "gamma": "id", "spatial": "deriv", "momentum": 0}
+    ],
+    "scalar": [
+      {"name": "id", "gamma": "id", "spatial": "smeared", "momentum": 0},
+      {"name": "g5_deriv", "gamma": "g5", "spatial": "deriv", "momentum": 0}
+    ]
+  }
+}
