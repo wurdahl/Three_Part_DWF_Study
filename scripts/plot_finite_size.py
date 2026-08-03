@@ -99,6 +99,8 @@ def main():
     parser.add_argument("--summary", type=Path, default=SUMMARY)
     parser.add_argument("--mf", default="0.2",
                         help="fermion mass shown in the title")
+    parser.add_argument("--nt", default="32",
+                        help="temporal extent shown in the title")
     parser.add_argument("--out", type=Path, default=FIGURE)
     parser.add_argument("--channel", choices=["pion", "eta"],
                         default="pion",
@@ -134,7 +136,9 @@ def main():
     # With a second fit on the plot an m_inf-scaled axis is ambiguous, so
     # the invL variant plots directly against Nx.
     scale = 1.0 if args.invL else mInf
-    xs = np.geomspace(3.2, 43, 200)               # in Nx units
+    x_low = nxs[0] * 0.82
+    x_high = nxs[-1] * 1.18
+    xs = np.geomspace(x_low, x_high, 200)         # in Nx units
     band = numeric_band(fvExp, xs, popt, pcov)
 
     fig, ax = plt.subplots(figsize=(7, 5.5), layout="constrained")
@@ -168,6 +172,7 @@ def main():
                 label=rf"$m_\infty + c/L$  ($N_x \geq {args.invL_min_nx}$)")
         annotations.append(
             (rf"$am_{sym}^\infty = {fmtErr(mInfI, dmInfI)}$"
+             rf"$,\ c = {fmtErr(poptI[1], np.sqrt(pcovI[1, 1]))}$"
              rf"$,\ \chi^2/\mathrm{{dof}} = {chi2I:.1f}$", JLab_red))
         print(f"invL (Nx >= {args.invL_min_nx}): "
               f"m_inf = {fmtErr(mInfI, dmInfI)}   "
@@ -205,12 +210,12 @@ def main():
         ax.set_xlabel(rf"$m_{sym}^\infty L$")
     ax.minorticks_off()
     ax.set_ylabel(rf"$a m_{sym}$")
-    ax.set_xlim(scale * 3, scale * 44)
+    ax.set_xlim(scale * x_low, scale * x_high)
     ax.set_ylim(bottom=0.0)
 
     x_name = r"$N_x$" if args.invL else rf"$m_{sym}^\infty L$"
     ax.set_title(rf"$am_{sym}$ vs {x_name}:  $\beta = 3$, "
-                 rf"$m_f = {args.mf}$, $N_t = 32$", fontsize=17, pad=12)
+                 rf"$m_f = {args.mf}$, $N_t = {args.nt}$", fontsize=17, pad=12)
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(args.out)
