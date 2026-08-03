@@ -104,6 +104,15 @@ can be re-analyzed without regenerating the Markov chains.
 `m_inf + A exp(-B L)`, annotates the chi^2/dof, and writes a
 `figs/pionMassVsMpiL_*.pdf` summary figure (requires matplotlib and scipy).
 
+Measurement solves (the analyzer's propagators and the distillation
+perambulators) use an even-odd preconditioned solver by default: the
+spacetime hopping only connects opposite-parity sites and the constant
+fifth-dimension block inverts in closed form, so CGNR runs on the
+better-conditioned Schur complement over half the lattice. This is
+~2-2.5x faster and agrees with the unpreconditioned path to solver
+tolerance; set `dwf.even_odd = 0` to fall back for cross-checking.
+Lattices with odd Nt or Nx fall back automatically.
+
 The analyzers measure independent gauge configurations concurrently with
 OpenMP. Set `analysis.threads = 0` for the runtime default, or choose a fixed
 thread count. Domain-wall solves use substantial memory per worker, so reduce

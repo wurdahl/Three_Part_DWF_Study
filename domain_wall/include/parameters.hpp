@@ -36,6 +36,12 @@ inline const int max_momentum =
 inline const unsigned long long random_seed =
     runtime_config().unsigned_integer("dwf.random_seed");
 
+// Even-odd preconditioning for measurement solves (analyzer and
+// perambulators). On by default; set dwf.even_odd = 0 to fall back to
+// the unpreconditioned CGNR, e.g. for cross-checking.
+inline const int even_odd_precond =
+    runtime_config().integer_or("dwf.even_odd", 1);
+
 // Distillation (hadspec-style) measurement. Parameter files without these
 // keys keep working: 0 vectors means "min(8, Nx)" and an empty source list
 // means "0 and Nt/2", matching the wall-source measurement.

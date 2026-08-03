@@ -2,6 +2,7 @@
 
 #include "cg_solver.hpp"
 #include "dwf_operator.hpp"
+#include "dwf_solve.hpp"
 #include "indexing.hpp"
 #include "parameters.hpp"
 #include "spin.hpp"
@@ -41,11 +42,6 @@ inline ComplexCorr estimate_pseudoscalar_loop_density(
     const Eigen::Matrix2cd PR = projector_R();
     const Eigen::Matrix2cd gamma5 = sigma3();
 
-    const auto apply_M = [&](const VectorC& v)
-    {
-        return apply_D_dagger_D(theta, v);
-    };
-
     for (int noise = 0; noise < eta_noise_vectors; ++noise)
     {
         std::vector<Complex> eta(
@@ -74,9 +70,8 @@ inline ComplexCorr estimate_pseudoscalar_loop_density(
             }
         }
 
-        const VectorC rhs = apply_D_dagger(theta, source);
-        const CgResult solve = conjugate_gradient(
-            apply_M, rhs, nullptr, propagator_rtol, propagator_maxiter);
+        const CgResult solve = propagator_solve(
+            theta, source, propagator_rtol, propagator_maxiter);
         if (!solve.converged)
             throw std::runtime_error("Eta loop CGNR failed to converge");
 
@@ -118,10 +113,6 @@ inline std::vector<Corr> compute_momentum_CPP(const Gauge& theta)
     const Eigen::Matrix2cd PL = projector_L();
     const Eigen::Matrix2cd PR = projector_R();
     const std::array<int, 2> source_times = {0, Nt / 2};
-    const auto apply_M = [&](const VectorC& v)
-    {
-        return apply_D_dagger_D(theta, v);
-    };
 
     for (int t_src : source_times)
     {
@@ -136,10 +127,8 @@ inline std::vector<Corr> compute_momentum_CPP(const Gauge& theta)
                 source[fermion_index(N5 - 1, t_src, 0, spin)]
                     += PR(spin, source_spin);
             }
-            const VectorC rhs = apply_D_dagger(theta, source);
-            const CgResult solve = conjugate_gradient(
-                apply_M, rhs, nullptr,
-                propagator_rtol, propagator_maxiter);
+            const CgResult solve = propagator_solve(
+                theta, source, propagator_rtol, propagator_maxiter);
             if (!solve.converged)
                 throw std::runtime_error(
                     "Momentum propagator CGNR failed to converge");
@@ -189,11 +178,6 @@ inline std::array<VectorC, 2> boundary_wall_source_propagator(
 
     std::array<VectorC, 2> propagators;
 
-    const auto apply_M = [&](const VectorC& v)
-    {
-        return apply_D_dagger_D(theta, v);
-    };
-
     for (int source_spin = 0; source_spin < Ns; ++source_spin)
     {
         VectorC source = VectorC::Zero(Ndof);
@@ -210,14 +194,8 @@ inline std::array<VectorC, 2> boundary_wall_source_propagator(
             }
         }
 
-        const VectorC rhs = apply_D_dagger(theta, source);
-
-        const CgResult solve = conjugate_gradient(
-            apply_M,
-            rhs,
-            nullptr,
-            propagator_rtol,
-            propagator_maxiter);
+        const CgResult solve = propagator_solve(
+            theta, source, propagator_rtol, propagator_maxiter);
 
         if (!solve.converged)
             std::cout << "    CGNR info = nonzero\n";

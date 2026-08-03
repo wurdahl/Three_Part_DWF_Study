@@ -19,7 +19,7 @@ g++ "${flags[@]}" -Idomain_wall/include domain_wall/build_perambulators.cpp -o b
 g++ "${flags[@]}" -Iwilson/include wilson/generate_configs.cpp -o bin/generate_wilson
 g++ "${flags[@]}" -Iwilson/include wilson/analyze_configs.cpp -o bin/analyze_wilson
 
-echo "Built four executables in bin/"
+echo "Built five executables in bin/"
 
 # Optional CUDA generator. nvcc 12.x cannot emit Blackwell SASS, so embed
 # compute_90 PTX and let the driver JIT it for the installed GPU.

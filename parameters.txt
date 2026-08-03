@@ -40,6 +40,10 @@ dwf.propagator_rtol = 1.0e-8
 dwf.propagator_maxiter = 800
 dwf.random_seed = 1234
 
+# Even-odd preconditioned measurement solves (~2-2.5x faster; identical
+# results to solver tolerance). Set 0 for the unpreconditioned CGNR.
+dwf.even_odd = 1
+
 # Distillation (hadspec-style) measurement: bin/build_perambulators.
 # n_vectors = 0 means min(8, Nx); an empty/missing t_sources means 0,Nt/2.
 distillation.n_vectors = 0

@@ -2,6 +2,7 @@
 
 #include "cg_solver.hpp"
 #include "dwf_operator.hpp"
+#include "dwf_solve.hpp"
 #include "indexing.hpp"
 #include "parameters.hpp"
 #include "spin.hpp"
@@ -146,10 +147,6 @@ inline std::vector<Eigen::MatrixXcd> compute_perambulator(
 
     const Eigen::Matrix2cd PL = projector_L();
     const Eigen::Matrix2cd PR = projector_R();
-    const auto apply_M = [&](const VectorC& v)
-    {
-        return apply_D_dagger_D(theta, v);
-    };
 
     for (int l = 0; l < n; ++l)
     {
@@ -168,10 +165,8 @@ inline std::vector<Eigen::MatrixXcd> compute_perambulator(
                 }
             }
 
-            const VectorC rhs = apply_D_dagger(theta, source);
-            const CgResult solve = conjugate_gradient(
-                apply_M, rhs, nullptr,
-                propagator_rtol, propagator_maxiter);
+            const CgResult solve = propagator_solve(
+                theta, source, propagator_rtol, propagator_maxiter);
             if (!solve.converged)
                 throw std::runtime_error(
                     "Perambulator CGNR failed to converge");
