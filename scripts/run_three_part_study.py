@@ -176,9 +176,17 @@ def run_case(label, changes, destination):
                 execute([ROOT / generator], work, log)
         else:
             execute([ROOT / generator], work, log)
+        # The optional *_gpu measurement binaries exist only where the
+        # CUDA build ran; fall back to the CPU ones otherwise.
+        def measurement(name):
+            gpu_variant = ROOT / f"bin/{name}_gpu"
+            if use_gpu and gpu_variant.exists():
+                return [gpu_variant]
+            return [ROOT / f"bin/{name}"]
+
         measurements = [
-            [ROOT / "bin/analyze_domain_wall"],
-            [ROOT / "bin/build_perambulators"],
+            measurement("analyze_domain_wall"),
+            measurement("build_perambulators"),
         ]
         if use_gpu:
             with ANALYSIS_LOCK:

@@ -31,6 +31,11 @@ inline ComplexCorr estimate_pseudoscalar_loop_density(
 {
     if (eta_noise_vectors < 1)
         throw std::runtime_error("eta.noise_vectors must be positive");
+    if (eta_time_dilution < 1 || Nt % eta_time_dilution != 0)
+        throw std::runtime_error(
+            "eta.time_dilution must be positive and divide dwf.Nt");
+    if (eta_spin_dilution != 1 && eta_spin_dilution != Ns)
+        throw std::runtime_error("eta.spin_dilution must be 1 or 2");
 
     ComplexCorr loop(Nt * Nx, Complex(0.0, 0.0));
     std::mt19937_64 rng(seed);
@@ -46,54 +51,82 @@ inline ComplexCorr estimate_pseudoscalar_loop_density(
     {
         std::vector<Complex> eta(
             static_cast<std::size_t>(Nt * Nx * Ns));
-        VectorC source = VectorC::Zero(Ndof);
 
         for (int t = 0; t < Nt; ++t)
             for (int x = 0; x < Nx; ++x)
                 for (int spin = 0; spin < Ns; ++spin)
                     eta[(t * Nx + x) * Ns + spin] = phases[z4(rng)];
 
-        for (int t = 0; t < Nt; ++t)
+        // Dilution: the noise vector is split into subsets that are
+        // solved separately, so the only surviving off-diagonal noise at
+        // a site comes from within its own subset. Time dilution is
+        // interlaced (t = t_class mod eta_time_dilution), which is what
+        // matters for a time-separated loop correlator. With both
+        // dilutions set to 1 this is the original single-solve estimator.
+        for (int t_class = 0; t_class < eta_time_dilution; ++t_class)
         {
-            for (int x = 0; x < Nx; ++x)
+            for (int spin_class = 0;
+                 spin_class < eta_spin_dilution;
+                 ++spin_class)
             {
-                Eigen::Vector2cd value;
-                for (int spin = 0; spin < Ns; ++spin)
-                    value[spin] = eta[(t * Nx + x) * Ns + spin];
-                const Eigen::Vector2cd left = PL * value;
-                const Eigen::Vector2cd right = PR * value;
-                for (int spin = 0; spin < Ns; ++spin)
+                const auto in_subset = [&](int spin)
                 {
-                    source[fermion_index(0, t, x, spin)] = left[spin];
-                    source[fermion_index(N5 - 1, t, x, spin)] += right[spin];
-                }
-            }
-        }
+                    return eta_spin_dilution == 1 || spin == spin_class;
+                };
 
-        const CgResult solve = propagator_solve(
-            theta, source, propagator_rtol, propagator_maxiter);
-        if (!solve.converged)
-            throw std::runtime_error("Eta loop CGNR failed to converge");
-
-        for (int t = 0; t < Nt; ++t)
-        {
-            for (int x = 0; x < Nx; ++x)
-            {
-                Eigen::Vector2cd psi_left;
-                Eigen::Vector2cd psi_right;
-                Eigen::Vector2cd noise_value;
-                for (int spin = 0; spin < Ns; ++spin)
+                VectorC source = VectorC::Zero(Ndof);
+                for (int t = t_class; t < Nt; t += eta_time_dilution)
                 {
-                    psi_left[spin] =
-                        solve.x[fermion_index(0, t, x, spin)];
-                    psi_right[spin] =
-                        solve.x[fermion_index(N5 - 1, t, x, spin)];
-                    noise_value[spin] =
-                        eta[(t * Nx + x) * Ns + spin];
+                    for (int x = 0; x < Nx; ++x)
+                    {
+                        Eigen::Vector2cd value =
+                            Eigen::Vector2cd::Zero();
+                        for (int spin = 0; spin < Ns; ++spin)
+                            if (in_subset(spin))
+                                value[spin] =
+                                    eta[(t * Nx + x) * Ns + spin];
+                        const Eigen::Vector2cd left = PL * value;
+                        const Eigen::Vector2cd right = PR * value;
+                        for (int spin = 0; spin < Ns; ++spin)
+                        {
+                            source[fermion_index(0, t, x, spin)]
+                                += left[spin];
+                            source[fermion_index(N5 - 1, t, x, spin)]
+                                += right[spin];
+                        }
+                    }
                 }
-                const Eigen::Vector2cd q =
-                    PL * psi_left + PR * psi_right;
-                loop[t * Nx + x] += noise_value.dot(gamma5 * q);
+
+                const CgResult solve = propagator_solve(
+                    theta, source, propagator_rtol, propagator_maxiter);
+                if (!solve.converged)
+                    throw std::runtime_error(
+                        "Eta loop CGNR failed to converge");
+
+                for (int t = t_class; t < Nt; t += eta_time_dilution)
+                {
+                    for (int x = 0; x < Nx; ++x)
+                    {
+                        Eigen::Vector2cd psi_left;
+                        Eigen::Vector2cd psi_right;
+                        Eigen::Vector2cd noise_value =
+                            Eigen::Vector2cd::Zero();
+                        for (int spin = 0; spin < Ns; ++spin)
+                        {
+                            psi_left[spin] =
+                                solve.x[fermion_index(0, t, x, spin)];
+                            psi_right[spin] =
+                                solve.x[fermion_index(N5 - 1, t, x, spin)];
+                            if (in_subset(spin))
+                                noise_value[spin] =
+                                    eta[(t * Nx + x) * Ns + spin];
+                        }
+                        const Eigen::Vector2cd q =
+                            PL * psi_left + PR * psi_right;
+                        loop[t * Nx + x] +=
+                            noise_value.dot(gamma5 * q);
+                    }
+                }
             }
         }
     }

@@ -54,6 +54,11 @@ distillation.t_sources = 0,16
 eta.noise_vectors = 8
 eta.random_seed = 918273
 eta.flavors = 2
+# Dilution of the Z4 noise: solves per config scale as
+# noise_vectors * time_dilution * spin_dilution. time_dilution must
+# divide dwf.Nt; spin_dilution is 1 or 2. Both 1 = undiluted.
+eta.time_dilution = 1
+eta.spin_dilution = 1
 
 # Shared analysis controls
 # 0 uses OpenMP's automatic choice; otherwise set an explicit thread count.

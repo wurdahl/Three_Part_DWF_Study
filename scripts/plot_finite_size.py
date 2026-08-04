@@ -63,15 +63,22 @@ def fvInvL(Nx, mInf, c):
 
 
 def read_residual_masses(summary):
-    """Mean m_res per volume from the archived per-case correlator.csv,
-    averaged over the analyzer's central window t = 3..Nt-4."""
+    """Mean m_res per volume. Prefers residual_mass_summary.csv, whose
+    window stops where the correlators lose signal; older checkpoints
+    without it fall back to the fixed t = 3..Nt-4 average."""
     result = {}
     for case in sorted(summary.parent.glob("Nx_*/correlator.csv")):
+        nx = int(case.parent.name.split("_")[1])
+        digest = case.parent / "residual_mass_summary.csv"
+        if digest.exists():
+            with digest.open(newline="") as stream:
+                row = next(csv.DictReader(stream))
+            result[nx] = float(row["m_res"])
+            continue
         with case.open(newline="") as stream:
             rows = list(csv.DictReader(stream))
         values = [float(row["m_res"]) for row in rows[3:len(rows) - 3]]
-        result[int(case.parent.name.split("_")[1])] = \
-            sum(values) / len(values)
+        result[nx] = sum(values) / len(values)
     return result
 
 

@@ -30,7 +30,16 @@ if command -v nvcc >/dev/null 2>&1; then
   g++ "${flags[@]}" -Idomain_wall/include \
       domain_wall/generate_configs_gpu.cpp bin/gpu_hmc.o \
       -o bin/generate_domain_wall_gpu -lcudart
-  echo "Built bin/generate_domain_wall_gpu"
+  # GPU measurement variants. The CPU analyzers above are untouched, so a
+  # machine without CUDA keeps exactly the same four executables.
+  g++ "${flags[@]}" -DDWF_GPU_ANALYSIS -Idomain_wall/include \
+      domain_wall/analyze_configs.cpp bin/gpu_hmc.o \
+      -o bin/analyze_domain_wall_gpu -lcudart
+  g++ "${flags[@]}" -DDWF_GPU_ANALYSIS -Idomain_wall/include \
+      domain_wall/build_perambulators.cpp bin/gpu_hmc.o \
+      -o bin/build_perambulators_gpu -lcudart
+  echo "Built bin/generate_domain_wall_gpu, bin/analyze_domain_wall_gpu,"
+  echo "      bin/build_perambulators_gpu"
 else
   echo "nvcc not found; skipped bin/generate_domain_wall_gpu"
 fi

@@ -28,6 +28,13 @@ inline const double propagator_rtol = runtime_config().real("dwf.propagator_rtol
 inline const int propagator_maxiter = runtime_config().integer("dwf.propagator_maxiter");
 inline const int analysis_threads = runtime_config().integer("analysis.threads");
 inline const int eta_noise_vectors = runtime_config().integer("eta.noise_vectors");
+// Dilution of the Z4 volume noise. Solves per configuration scale as
+// noise_vectors * time_dilution * spin_dilution; 1 and 1 reproduce the
+// original undiluted estimator exactly.
+inline const int eta_time_dilution =
+    runtime_config().integer_or("eta.time_dilution", 1);
+inline const int eta_spin_dilution =
+    runtime_config().integer_or("eta.spin_dilution", 1);
 inline const int eta_flavors = runtime_config().integer("eta.flavors");
 inline const unsigned long long eta_random_seed =
     runtime_config().unsigned_integer("eta.random_seed");
@@ -41,6 +48,11 @@ inline const unsigned long long random_seed =
 // the unpreconditioned CGNR, e.g. for cross-checking.
 inline const int even_odd_precond =
     runtime_config().integer_or("dwf.even_odd", 1);
+
+// Measurement solves on the GPU. Only consulted by the optional
+// *_gpu binaries; the default CPU builds ignore it entirely.
+inline const int gpu_analysis =
+    runtime_config().integer_or("dwf.gpu_analysis", 1);
 
 // Distillation (hadspec-style) measurement. Parameter files without these
 // keys keep working: 0 vectors means "min(8, Nx)" and an empty source list

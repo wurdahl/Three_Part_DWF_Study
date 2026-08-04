@@ -8,6 +8,7 @@
 //      per-chunk host traffic is one 8-byte residual read.
 
 #include "include/gpu_hmc.hpp"
+#include "include/gpu_propagator.hpp"
 
 #include <cuda_runtime.h>
 #include <cuda/std/complex>
@@ -949,4 +950,320 @@ std::string GpuHmc::device_name() const
     check(cudaGetDeviceProperties(&properties, device),
           "cudaGetDeviceProperties");
     return properties.name;
+}
+
+// =====================================================================
+// GPU measurement solver (see include/gpu_propagator.hpp). Reuses the
+// operator, reduction, and CG kernels above; the only new pieces are a
+// D^dag D application order for CGNR and the fp64 defect-correction
+// loop that lets the inner CG stay in fp32.
+// =====================================================================
+
+namespace {
+
+// Scaled fp64 -> fp32 conversion. The outer residual shrinks by the
+// inner tolerance each pass, so it is normalized before entering fp32.
+__global__ void k_f64_to_f32_scaled(
+    C<float>* __restrict__ dst, const C<double>* __restrict__ src,
+    double scale, int n)
+{
+    const int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < n)
+        dst[i] = C<float>(
+            static_cast<float>(src[i].real() * scale),
+            static_cast<float>(src[i].imag() * scale));
+}
+
+__global__ void k_accumulate_scaled(
+    C<double>* __restrict__ acc, const C<float>* __restrict__ dx,
+    double scale, int n)
+{
+    const int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < n)
+        acc[i] += C<double>(dx[i].real() * scale, dx[i].imag() * scale);
+}
+
+// Refinement passes and the tolerance of each inner fp32 solve. fp32
+// carries ~7 digits, so 1e-5 per pass is comfortably attainable and two
+// passes clear 1e-8.
+constexpr int kMaxRefine = 20;
+constexpr double kInnerRtol = 1.0e-5;
+
+} // namespace
+
+struct GpuPropagator::Impl
+{
+    Dims dims;
+    double M5;
+    double mf;
+    int ndof;
+    int nsites;
+    int ngauge;
+
+    cudaStream_t stream = nullptr;
+    DeviceFields<double> f64;
+    DeviceFields<float> f32;
+    C<double>* src = nullptr;
+    C<double>* acc = nullptr;
+    double* theta_dev = nullptr;
+    double* scal = nullptr;
+    double* partial = nullptr;
+
+    template <typename T>
+    void alloc(DeviceFields<T>& f)
+    {
+        auto grab = [](C<T>*& ptr, std::size_t count)
+        {
+            check(cudaMalloc(&ptr, count * sizeof(C<T>)), "cudaMalloc");
+        };
+        grab(f.x, ndof);
+        grab(f.r, ndof);
+        grab(f.p, ndof);
+        grab(f.Ap, ndof);
+        grab(f.tmp, ndof);
+        grab(f.b, ndof);
+        grab(f.links, ngauge);
+    }
+
+    template <typename T>
+    void release(DeviceFields<T>& f)
+    {
+        for (void* ptr : {static_cast<void*>(f.x), static_cast<void*>(f.r),
+                          static_cast<void*>(f.p), static_cast<void*>(f.Ap),
+                          static_cast<void*>(f.tmp), static_cast<void*>(f.b),
+                          static_cast<void*>(f.links)})
+            cudaFree(ptr);
+        if (f.chunk)
+            cudaGraphExecDestroy(f.chunk);
+    }
+
+    template <typename T>
+    void cdot(const C<T>* a, const C<T>* b, Slot slot)
+    {
+        k_cdot_partial<T><<<kReduceBlocks, kBlock, 0, stream>>>(
+            a, b, partial, ndof);
+        k_reduce_final<<<1, kReduceBlocks, 0, stream>>>(
+            partial, scal + slot, 1.0);
+    }
+
+    double read_scalar(Slot slot)
+    {
+        double value = 0.0;
+        check(cudaMemcpyAsync(&value, scal + slot, sizeof(double),
+                              cudaMemcpyDeviceToHost, stream),
+              "scalar read");
+        check(cudaStreamSynchronize(stream), "scalar sync");
+        return value;
+    }
+
+    // D^dag D, the CGNR normal operator (the HMC uses D D^dag instead).
+    template <typename T>
+    void apply_N(const C<T>* in, C<T>* out, C<T>* scratch,
+                 const C<T>* links)
+    {
+        const T tM5 = static_cast<T>(M5);
+        const T tmf = static_cast<T>(mf);
+        k_apply_D<T><<<blocks_for(nsites), kBlock, 0, stream>>>(
+            in, scratch, links, dims, tM5, tmf);
+        k_apply_D_dagger<T><<<blocks_for(nsites), kBlock, 0, stream>>>(
+            scratch, out, links, dims, tM5, tmf);
+    }
+
+    template <typename T>
+    void capture_chunk(DeviceFields<T>& f)
+    {
+        const int nb = blocks_for(ndof);
+        // Thread-local capture: the analyzer builds one solver per
+        // OpenMP thread, and a global-mode capture would forbid the
+        // other threads' allocations while this one records.
+        check(cudaStreamBeginCapture(
+                  stream, cudaStreamCaptureModeThreadLocal),
+              "begin capture");
+        for (int i = 0; i < kChunk; ++i)
+        {
+            apply_N<T>(f.p, f.Ap, f.tmp, f.links);
+            cdot<T>(f.p, f.Ap, PAP);
+            k_set_alpha<<<1, 1, 0, stream>>>(scal);
+            k_cg_update<T><<<nb, kBlock, 0, stream>>>(
+                f.x, f.r, f.p, f.Ap, scal, ndof);
+            cdot<T>(f.r, f.r, RR_NEW);
+            k_set_beta<<<1, 1, 0, stream>>>(scal);
+            k_xpay<T><<<nb, kBlock, 0, stream>>>(f.p, f.r, scal, ndof);
+        }
+        cudaGraph_t graph = nullptr;
+        check(cudaStreamEndCapture(stream, &graph), "end capture");
+        check(cudaGraphInstantiate(&f.chunk, graph, 0), "instantiate");
+        cudaGraphDestroy(graph);
+    }
+
+    // Cold-start CG on D^dag D x = b over the fields in f.
+    template <typename T>
+    bool cg(DeviceFields<T>& f, double rtol, int maxiter, int& iterations)
+    {
+        iterations = 0;
+        check(cudaMemsetAsync(f.x, 0, ndof * sizeof(C<T>), stream),
+              "memset x");
+        check(cudaMemcpyAsync(f.r, f.b, ndof * sizeof(C<T>),
+                              cudaMemcpyDeviceToDevice, stream),
+              "copy r=b");
+        check(cudaMemcpyAsync(f.p, f.r, ndof * sizeof(C<T>),
+                              cudaMemcpyDeviceToDevice, stream),
+              "copy p=r");
+
+        cdot<T>(f.b, f.b, BNORM2);
+        cdot<T>(f.r, f.r, RR_OLD);
+
+        const double bnorm2 = read_scalar(BNORM2);
+        if (bnorm2 == 0.0)
+            return true;
+        const double bnorm = std::sqrt(bnorm2);
+        double rr = read_scalar(RR_OLD);
+        if (std::sqrt(rr) / bnorm <= rtol)
+            return true;
+
+        while (iterations < maxiter)
+        {
+            check(cudaGraphLaunch(f.chunk, stream), "chunk launch");
+            iterations += kChunk;
+            rr = read_scalar(RR_NEW);
+            if (!std::isfinite(rr))
+                throw std::runtime_error(
+                    "GPU propagator CG produced a non-finite residual");
+            if (std::sqrt(rr) / bnorm <= rtol)
+                return true;
+        }
+        return false;
+    }
+};
+
+GpuPropagator::GpuPropagator(
+    int Nt, int Nx, int N5, double M5, double mf)
+    : impl_(new Impl)
+{
+    Impl& im = *impl_;
+    im.dims = Dims{Nt, Nx, N5};
+    im.M5 = M5;
+    im.mf = mf;
+    im.nsites = N5 * Nt * Nx;
+    im.ndof = im.nsites * 2;
+    im.ngauge = 2 * Nt * Nx;
+
+    check(cudaStreamCreate(&im.stream), "stream create");
+    im.alloc(im.f64);
+    im.alloc(im.f32);
+    check(cudaMalloc(&im.src, im.ndof * sizeof(C<double>)), "cudaMalloc");
+    check(cudaMalloc(&im.acc, im.ndof * sizeof(C<double>)), "cudaMalloc");
+    check(cudaMalloc(&im.theta_dev, im.ngauge * sizeof(double)),
+          "cudaMalloc");
+    check(cudaMalloc(&im.scal, NSLOTS * sizeof(double)), "cudaMalloc");
+    check(cudaMalloc(&im.partial, kReduceBlocks * sizeof(double)),
+          "cudaMalloc");
+    im.capture_chunk(im.f32);
+    im.capture_chunk(im.f64);
+}
+
+GpuPropagator::~GpuPropagator()
+{
+    Impl& im = *impl_;
+    im.release(im.f64);
+    im.release(im.f32);
+    cudaFree(im.src);
+    cudaFree(im.acc);
+    cudaFree(im.theta_dev);
+    cudaFree(im.scal);
+    cudaFree(im.partial);
+    if (im.stream)
+        cudaStreamDestroy(im.stream);
+}
+
+void GpuPropagator::set_gauge(const double* theta)
+{
+    Impl& im = *impl_;
+    check(cudaMemcpyAsync(im.theta_dev, theta,
+                          im.ngauge * sizeof(double),
+                          cudaMemcpyHostToDevice, im.stream),
+          "theta upload");
+    k_build_links<<<blocks_for(im.ngauge), kBlock, 0, im.stream>>>(
+        im.theta_dev, im.f64.links, im.ngauge);
+    k_f64_to_f32<<<blocks_for(im.ngauge), kBlock, 0, im.stream>>>(
+        im.f32.links, im.f64.links, im.ngauge);
+    check(cudaStreamSynchronize(im.stream), "gauge sync");
+}
+
+GpuPropagator::Result GpuPropagator::solve(
+    const std::complex<double>* source,
+    std::complex<double>* solution,
+    double rtol, int maxiter)
+{
+    Impl& im = *impl_;
+    const int nb = blocks_for(im.ndof);
+
+    check(cudaMemcpyAsync(im.src, source,
+                          im.ndof * sizeof(C<double>),
+                          cudaMemcpyHostToDevice, im.stream),
+          "source upload");
+
+    // Normal equations: solve D^dag D x = D^dag source.
+    k_apply_D_dagger<double><<<blocks_for(im.nsites), kBlock, 0,
+                               im.stream>>>(
+        im.src, im.f64.b, im.f64.links, im.dims, im.M5, im.mf);
+    check(cudaMemsetAsync(im.acc, 0, im.ndof * sizeof(C<double>),
+                          im.stream),
+          "memset acc");
+
+    im.cdot<double>(im.f64.b, im.f64.b, BNORM2);
+    const double bnorm2 = im.read_scalar(BNORM2);
+    Result result{0, 0.0, false};
+
+    if (bnorm2 == 0.0)
+    {
+        std::fill(solution, solution + im.ndof, std::complex<double>(0.0));
+        result.converged = true;
+        return result;
+    }
+    const double bnorm = std::sqrt(bnorm2);
+
+    double previous = std::numeric_limits<double>::infinity();
+    for (int pass = 0; pass < kMaxRefine; ++pass)
+    {
+        // fp64 residual of the normal equations at the current solution.
+        im.apply_N<double>(im.acc, im.f64.Ap, im.f64.tmp, im.f64.links);
+        k_residual<double><<<nb, kBlock, 0, im.stream>>>(
+            im.f64.r, im.f64.b, im.f64.Ap, im.ndof);
+        im.cdot<double>(im.f64.r, im.f64.r, RR_NEW);
+        const double rr = im.read_scalar(RR_NEW);
+        const double relative = std::sqrt(rr) / bnorm;
+        result.relative_residual = relative;
+
+        if (relative <= rtol)
+        {
+            result.converged = true;
+            break;
+        }
+        // A pass that fails to reduce the residual means fp32 has hit
+        // its floor; further passes cannot help.
+        if (relative >= previous)
+            break;
+        previous = relative;
+        if (result.iterations >= maxiter)
+            break;
+
+        const double scale = 1.0 / std::sqrt(rr);
+        k_f64_to_f32_scaled<<<nb, kBlock, 0, im.stream>>>(
+            im.f32.b, im.f64.r, scale, im.ndof);
+
+        int inner = 0;
+        im.cg(im.f32, kInnerRtol, maxiter - result.iterations, inner);
+        result.iterations += inner;
+
+        k_accumulate_scaled<<<nb, kBlock, 0, im.stream>>>(
+            im.acc, im.f32.x, 1.0 / scale, im.ndof);
+    }
+
+    check(cudaMemcpyAsync(solution, im.acc,
+                          im.ndof * sizeof(C<double>),
+                          cudaMemcpyDeviceToHost, im.stream),
+          "solution download");
+    check(cudaStreamSynchronize(im.stream), "solve sync");
+    return result;
 }

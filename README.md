@@ -41,6 +41,20 @@ the domain-wall HMC (fp32 MD force solves, fp64 accept/reject action solves,
 CG in CUDA-graph chunks). Without `nvcc` the GPU build is skipped and nothing
 else changes — every GPU code path in this repository is opt-in.
 
+When `nvcc` is present, `compile.sh` also builds GPU measurement
+variants, `bin/analyze_domain_wall_gpu` and `bin/build_perambulators_gpu`.
+These solve the measurement propagators on the device, with one CUDA
+stream per OpenMP thread so independent configurations overlap. Consumer
+GPUs run fp64 at a small fraction of their fp32 rate, so the inner CG
+runs in fp32 and an outer fp64 defect-correction loop restores accuracy:
+each pass multiplies the residual by the inner tolerance, so two or three
+passes reach `dwf.propagator_rtol` with almost all arithmetic on the fast
+path. Measured against the even-odd preconditioned CPU analyzer at
+Nx = 40, Nt = 64, this is ~6-8x faster with results agreeing to solver
+tolerance (1e-7..1e-10). `dwf.gpu_analysis = 0` forces those binaries
+back to the CPU path. The four default executables are unchanged and
+contain no CUDA code.
+
 Validation switches: `DWF_GPU_FP64_MD=1` runs every solve in fp64, and
 building with `-DDWF_CG_CHUNK=1` reproduces the CPU solver's exact stopping
 iteration; together they reproduce the CPU Markov chain to machine precision.
@@ -149,7 +163,15 @@ helps retain short-range Markov-chain autocorrelation.
 
 The domain-wall C++ analyzer also retains its original residual-mass
 measurement `m_res = C_J5 / C_PP`; this is distinct from the pseudoscalar mass
-estimated by the shared script.
+estimated by the shared script. The ratio only plateaus once the ground state
+dominates both correlators, so the analyzer selects the averaging window
+automatically: it runs inward from the last timeslice where both correlators
+are still resolved and keeps points while they stay within 25% of the running
+plateau. The chosen window and average are written to
+`output/domain_wall/residual_mass_summary.csv`. The previous fixed
+`t = 3..Nt-4` window averaged the contaminated early timeslices and returned a
+negative m_res at heavy `mf` (m_res(3) = -1.4e-2 against a +5.9e-4 plateau at
+`mf = 0.5`).
 
 ## Distillation (hadspec-style) spectroscopy
 
@@ -224,7 +246,19 @@ C_eta(t) = C_connected(t) - Nf C_disconnected(t).
 The disconnected Wick contraction is estimated from complex Z4 volume-noise
 sources on the physical domain-wall boundary field. Configure its cost with
 `eta.noise_vectors`; its random stream is reproducible through
-`eta.random_seed`. The analyzer writes ensemble averages to
+`eta.random_seed`. The noise can be diluted with `eta.time_dilution`
+(interlaced timeslice classes, must divide `dwf.Nt`) and `eta.spin_dilution`
+(1 or 2); solves per configuration scale as the product of the three, and
+setting both dilutions to 1 reproduces the undiluted estimator exactly.
+
+Note that on the ensembles measured here dilution buys little: at fixed
+solve count, time plus spin dilution reduced the disconnected error by only
+5-9%, and raising `eta.noise_vectors` from 16 to 32 gained 8%. The variance
+of the disconnected correlator is dominated by gauge fluctuations rather
+than by the stochastic estimator, so it is bounded below by the ensemble
+size. Because the disconnected noise is roughly flat in t while the
+connected correlator decays exponentially, the window in which the eta is
+extractable grows only logarithmically with statistics. The analyzer writes ensemble averages to
 `output/domain_wall/correlator.csv` and bootstrap-ready measurements to
 `output/domain_wall/channels_by_config.csv`.
 

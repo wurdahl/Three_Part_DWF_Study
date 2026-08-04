@@ -101,16 +101,64 @@ int main()
             residual_mass[t] =
                 CJ5_average[t] / CPP_average[t];
 
-        double residual_mass_average = 0.0;
-        int residual_mass_count = 0;
-
-        for (int t = 3; t < Nt - 3; ++t)
+        // m_res = C_J5/C_PP only plateaus once the ground state dominates
+        // both correlators; at small t the two carry different excited
+        // states and the ratio is contaminated, strongly enough at heavy
+        // mf to be negative (m_res(3) = -1.4e-2 against a +5.9e-4 plateau
+        // at mf = 0.5), which dragged the old fixed 3..Nt-4 average
+        // negative. So the window runs inward from the last timeslice
+        // where both correlators are still resolved, keeping points while
+        // they stay near the running plateau average.
+        const auto standard_error =
+            [&](const std::vector<Corr>& all, double mean, int t)
         {
-            residual_mass_average += residual_mass[t];
-            ++residual_mass_count;
+            if (configuration_count < 2)
+                return 0.0;
+            double variance = 0.0;
+            for (const Corr& one : all)
+                variance += (one[t] - mean) * (one[t] - mean);
+            variance /= configuration_count - 1.0;
+            return std::sqrt(variance / configuration_count);
+        };
+
+        int residual_mass_last = 2;
+        for (int t = 3; t <= Nt / 2; ++t)
+        {
+            if (std::abs(CPP_average[t])
+                    <= standard_error(CPP_all, CPP_average[t], t)
+                || std::abs(CJ5_average[t])
+                    <= standard_error(CJ5_all, CJ5_average[t], t))
+                break;
+            residual_mass_last = t;
         }
 
-        residual_mass_average /= residual_mass_count;
+        // Fractional departure from the running plateau that ends the
+        // window. Loose enough to ride out ordinary scatter, tight enough
+        // to reject the contaminated early timeslices.
+        const double plateau_tolerance = 0.25;
+        int residual_mass_first = residual_mass_last;
+        double residual_mass_sum = 0.0;
+        int residual_mass_count = 0;
+
+        for (int t = residual_mass_last; t >= 3; --t)
+        {
+            if (residual_mass_count > 0)
+            {
+                const double mean =
+                    residual_mass_sum / residual_mass_count;
+                if (std::abs(residual_mass[t] - mean)
+                        > plateau_tolerance * std::abs(mean))
+                    break;
+            }
+            residual_mass_sum += residual_mass[t];
+            ++residual_mass_count;
+            residual_mass_first = t;
+        }
+
+        const double residual_mass_average =
+            residual_mass_count > 0
+                ? residual_mass_sum / residual_mass_count
+                : std::nan("");
 
         // Vacuum-subtracted disconnected Wick contraction, averaged over all
         // time origins. Subtraction is performed across gauge configurations.
@@ -248,6 +296,15 @@ int main()
                 << eta_average[t] << "\n";
         }
 
+        // The window is data-dependent, so downstream readers take the
+        // average from here rather than re-deriving it from correlator.csv.
+        std::ofstream residual_summary(
+            "output/domain_wall/residual_mass_summary.csv");
+        residual_summary << "m_res,t_min,t_max\n"
+                         << residual_mass_average << ","
+                         << residual_mass_first << ","
+                         << residual_mass_last << "\n";
+
         std::ofstream by_config(
             "output/domain_wall/channels_by_config.csv");
         by_config << "config";
@@ -289,6 +346,8 @@ int main()
             << Nt << ", " << Nx << ")"
             << "\nm_res = "
             << residual_mass_average
+            << "  (plateau t = " << residual_mass_first
+            << ".." << residual_mass_last << ")"
             << "\n\nWrote:\n"
             << "  output/domain_wall/residual_mass_correlators.svg\n"
             << "  output/domain_wall/residual_mass.svg\n"
